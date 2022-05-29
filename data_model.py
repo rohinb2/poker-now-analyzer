@@ -38,7 +38,7 @@ class Action:
 
     def __str__(self):
         if self.decision in [Decision.FOLD, Decision.CHECK]:
-            return f"Player: {self.player} took action {self.decision}." 
+            return f"Player: {self.player} took action {self.decision}."
         return f"Player: {self.player} took action {self.decision} for amount {self.amount}."
 
 class StreetType(Enum):
@@ -75,7 +75,7 @@ class Street:
         if action.decision == Decision.MISSED_SMALL_BLIND:
             self.missed_small_blind = action
             return
-            
+
         if action.amount is not None:
             # Small blind functionally is a bet, a bet's money is not part of the pot till there's at least one call.
             if self._bet_facing is None:
@@ -96,7 +96,7 @@ class Street:
                 raise_amount = action.amount - self._bet_facing
                 self.uncalled_bet = (action.player, raise_amount)
                 self._bet_facing = action.amount
-            
+
             elif float_eq(action.amount, self._bet_facing):
                 # The uncalled bet value is the *additional* amount they bet. So, we use the call value to determine what their actual money invested is.
 
@@ -110,7 +110,7 @@ class Street:
 
             else:
                 # The call value is less than the uncalled bet value (the player calling is going all in)
-                
+
                 # If no one else has yet called, commit the portion of the uncalled bet to the pot that the player is calling
                 if self.uncalled_bet is not None:
                     betting_player, _ = self.uncalled_bet
@@ -123,7 +123,7 @@ class Street:
     @property
     def final_pot_value(self):
         return self.starting_pot_value + sum([v for _, v in self.money_in_per_player.items()])
-    
+
     @property
     def uncalled_bet_value(self):
         if self.uncalled_bet is not None:
@@ -141,6 +141,7 @@ class Street:
 
 @attr.s(auto_attribs=True, init=False)
 class Hand:
+    hand_number: int
     start_time: datetime
     streets: List[Street]
     starting_stacks: Dict[str, float]
@@ -148,15 +149,16 @@ class Hand:
     uncalled_bet: Optional[float]
     shown_cards: Dict[str, List[str]]
 
-    def __init__(self, start_time: datetime, starting_stacks: Dict[str, float]):
+    def __init__(self, hand_number: int, start_time: datetime, starting_stacks: Dict[str, float]):
         logger.info("called")
+        self.hand_number = hand_number
         self.start_time = start_time
         self.starting_stacks = starting_stacks
         self.streets = [Street(StreetType.PREFLOP, [], [])]
         self.winnings = {}
         self.uncalled_bet = None
         self.shown_cards = {}
-        
+
     @property
     def final_hand_value(self):
         return self.streets[-1].final_pot_value
@@ -166,58 +168,60 @@ class Hand:
         community_cards = copy.copy(previous_street.community_cards)
         community_cards.extend(new_community_cards)
         self.streets.append(Street(
-            street_type=street_type, 
-            actions=[], 
-            starting_pot_value=previous_street.final_pot_value, 
+            street_type=street_type,
+            actions=[],
+            starting_pot_value=previous_street.final_pot_value,
             community_cards=community_cards)
         )
-    
+
     def contains_player(self, player: str):
         return player in self.starting_stacks
-    
-    def player_voluntarily_puts_money_in_preflop(self, player: str):
+
+    def player_vpip(self, player: str):
         preflop_street = self.streets[0]
-        if player in preflop_street.money_in_per_player:
-            for action in preflop_street.actions:
-                # does straddle count?
-                if action.decision in [Decision.BET, Decision.CALL, Decision.RAISE, Decision.STRADDLE]:
-                    return True
+        for action in preflop_street.actions:
+            # does straddle count?
+            if action.decision in [Decision.BET, Decision.CALL, Decision.RAISE] and action.player == player:
+                return True
         return False
-    
-    def player_preflop_raises(self, player: str):
+
+    def player_pfr(self, player: str):
         preflop_street = self.streets[0]
-        if player in preflop_street.money_in_per_player:
-            for action in preflop_street.actions:
-                if action.decision == Decision.RAISE:
-                    return True
+        for action in preflop_street.actions:
+            if action.decision == Decision.RAISE and action.player == player:
+                return True
         return False
-    
+
     def show_card(self, player: str, cards: List[str]):
         self.shown_cards[player] = cards
-    
+
     def add_action(self, action: Action):
         self.streets[-1].add_action(action)
-    
+
     def record_winning(self, player: str, amount: float, combination: str = ""):
-        self.winnings[player] = (amount, combination)
+        if player in self.winnings:
+            cur_amount, _ = self.winnings[player]
+            self.winnings[player] = (cur_amount + amount, combination)
+        else:
+            self.winnings[player] = (amount, combination)
 
     def conclude_hand(self):
         starting_table_total = 0
         for _, v in self.starting_stacks.items():
             starting_table_total += v
-        
+
         # Play out finances per hand and ensure it aligns
         ending_stacks = copy.copy(self.starting_stacks)
         for street in self.streets:
             for player, v in street.money_in_per_player.items():
                 ending_stacks[player] -= v
-            
+
         for player, (v, _) in self.winnings.items():
             ending_stacks[player] += v
-        
+
         for _, v in ending_stacks.items():
             starting_table_total -= v
-        
+
         if self.streets[0].missed_small_blind is not None:
             starting_table_total += self.streets[0].missed_small_blind.amount
 
@@ -227,18 +231,18 @@ class Hand:
         for s in self.streets:
             if s.uncalled_bet_value is not None:
                 internal_uncalled_bet_value = s.uncalled_bet_value
-    
+
         if ((internal_uncalled_bet_value is None) != (self.uncalled_bet is None)) or not float_eq(self.uncalled_bet, internal_uncalled_bet_value):
             logger.error("Uncalled bet values don't align.")
             raise Exception("Uncalled bet values don't align")
-        
+
         if not float_eq(starting_table_total, 0.0):
             logger.error("Hand winnings don't align.")
             raise Exception("Hand winnings don't align")
 
 
     def __str__(self):
-        to_print = [f"The players start the hand with stacks at time {self.start_time}: "]
+        to_print = [f"The players start the hand {self.hand_number} with stacks at time {self.start_time}: "]
         to_print.extend([f"{p} : {v}" for p, v in self.starting_stacks.items()])
         to_print.append("")
         to_print.extend([str(s) for s in self.streets])
@@ -263,7 +267,3 @@ class Game:
         to_print.append("", "Players were out for: ")
         to_print.extend([f"Player {p} out for {v}" for p, v in players_out_for.items()])
         return '\n'.join(to_print)
-
-
-
-

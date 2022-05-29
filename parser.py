@@ -12,7 +12,7 @@ class Parser:
 
     def __init__(self):
         pass
-    
+
     @property
     def _cur_hand(self):
         return self._game.hands[-1]
@@ -77,7 +77,7 @@ class Parser:
             player_amounts = {player: stack_size for (player, stack_size) in zip(players, stack_size_counts)}
             if len(self._game.hands) > 0:
                 self._cur_hand.conclude_hand()
-            self._game.hands.append(Hand(datetime.now(), player_amounts))
+            self._game.hands.append(Hand(len(self._game.hands) + 1, datetime.now(), player_amounts))
         elif "-- starting hand" in line:
             if "dead button" in line:
                 dealer_name = "None"
@@ -196,7 +196,7 @@ class Parser:
             pass
         else:
             logger.warning(f"Unexpected line found in log: '{line}'. Likely the log format has changed and this script needs to be updated.")
-        
+
     def parse(self, file_name):
         self._game = Game()
         f = open(file_name, 'r')
@@ -208,7 +208,3 @@ class Parser:
                 logger.error(f"Error parsing line: {row}.")
                 raise e
         return self._game
-
-
-p = Parser()
-game = p.parse("/Users/rohinbhasin/Documents/Projects/poker-now-analyzer/log-2-22-my-persp.csv")
